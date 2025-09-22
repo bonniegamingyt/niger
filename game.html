@@ -1,0 +1,114 @@
+<div id="gameContainer"></div>
+<script>
+(function(){
+const container = document.getElementById('gameContainer');
+const canvas = document.createElement('canvas');
+canvas.width = 900;
+canvas.height = 500;
+canvas.style.background = '#87CEEB';
+canvas.style.border = '2px solid #000';
+container.appendChild(canvas);
+const ctx = canvas.getContext('2d');
+
+const W = canvas.width, H = canvas.height, WORLD_WIDTH = 2500;
+let keys = {}, camera = {x:0}, gravity=0.8, friction=0.87;
+let player, platforms=[], spikes=[], collectibles=[], items=[], questionBlocks=[], enemies=[], bullets=[];
+let score=0, coins=0, lives=3, ammo=10, lastShot=0, shootCooldown=400, currentLevel=0;
+
+function createPlayer(){ return {x:80,y:300,w:28,h:48,vx:0,vy:0,speed:3.6,jumping:false,grounded:false}; }
+
+const levels=[
+  {platforms:[{x:0,y:460,w:WORLD_WIDTH,h:40},{x:150,y:380,w:140,h:20},{x:400,y:320,w:120,h:20},{x:650,y:280,w:140,h:20}],
+   spikes:[{x:300,y:440,w:24,h:12},{x:500,y:440,w:24,h:12}],
+   collectibles:[{x:180,y:350,r:8},{x:420,y:290,r:8}],
+   questionBlocks:[{x:350,y:270,w:32,h:32,used:false}],
+   enemies:[{x:600,y:428,w:34,h:34,vx:1.2,range:[600,760],hp:2,type:'patrol',name:'Bob'}]
+  }
+];
+
+function loadLevel(n){
+  const lvl = JSON.parse(JSON.stringify(levels[n]));
+  player = createPlayer();
+  platforms = lvl.platforms; spikes = lvl.spikes; collectibles=lvl.collectibles; questionBlocks=lvl.questionBlocks;
+  enemies = lvl.enemies.map(e=>({...e})); bullets=[]; items=[];
+  ammo=10; lastShot=0;
+  currentLevel=n;
+}
+
+function rectCollide(a,b){ return a.x<a.x+b.w && a.x+a.w>b.x && a.y<a.y+b.h && a.y+a.h>b.y; }
+
+function update(){
+  if(keys['ArrowLeft']||keys['a']) player.vx = Math.max(player.vx-0.6,-player.speed);
+  if(keys['ArrowRight']||keys['d']) player.vx = Math.min(player.vx+0.6,player.speed);
+  if(!keys['ArrowLeft']&&!keys['ArrowRight']&&!keys['a']&&!keys['d']) player.vx*=friction;
+  if((keys['ArrowUp']||keys['w']||keys[' ']) && !player.jumping && player.grounded){ player.vy=-13.5; player.jumping=true; player.grounded=false; }
+  if(keys['j']||keys['k']) shoot();
+  player.vy += gravity; player.x+=player.vx; player.y+=player.vy; player.grounded=false;
+
+  // Platforms collision
+  for(const p of platforms){
+    if(rectCollide(player,p)){
+      if(player.vy>=0 && (player.y+player.h)-player.vy <= p.y+6){ player.y=p.y-player.h; player.vy=0; player.grounded=true; player.jumping=false; }
+    }
+  }
+
+  // Spikes collision
+  for(const s of spikes){ if(rectCollide(player,s)){ lives--; player.x=80; player.y=300; player.vx=0; player.vy=0; break;} }
+
+  // Question blocks
+  for(const qb of questionBlocks){
+    if(!qb.used && rectCollide(player,qb) && player.vy<0){
+      qb.used=true; items.push({x:qb.x+qb.w/2,y:qb.y-16,type:'coin',vy:-2,taken:false}); player.vy=0;
+    }
+  }
+
+  // Items
+  for(const it of items){
+    if(!it.taken){ it.vy+=gravity*0.3; it.y+=it.vy; if(rectCollide(it,player)){ it.taken=true; score+=15; coins++; } }
+  }
+  items = items.filter(it=>!it.taken);
+
+  // Enemy movement
+  for(const e of enemies){
+    if(e.type==='patrol'){ e.x+=e.vx; if(e.x<e.range[0]||e.x>e.range[1]) e.vx*=-1; }
+    if(rectCollide(player,e)){ lives--; player.x=80; player.y=300; player.vx=0; player.vy=0; }
+  }
+
+  camera.x = Math.max(0, player.x-W/3);
+}
+
+function shoot(){ const now=Date.now(); if(now-lastShot>=shootCooldown && ammo>0){
+  const dir = keys['ArrowLeft']||keys['a']?-1:1;
+  bullets.push({x:player.x+player.w/2+dir*10,y:player.y+player.h/2-4,w:8,h:4,vx:10*dir});
+  ammo--; lastShot=now;
+}}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#87CEEB'; ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.translate(-camera.x,0);
+
+  for(const p of platforms){ ctx.fillStyle='#6B8E23'; ctx.fillRect(p.x,p.y,p.w,p.h); }
+  for(const s of spikes){ ctx.fillStyle='#333'; ctx.beginPath(); ctx.moveTo(s.x,s.y+s.h); ctx.lineTo(s.x+s.w/2,s.y); ctx.lineTo(s.x+s.w,s.y+s.h); ctx.closePath(); ctx.fill(); }
+  for(const qb of questionBlocks){
+    ctx.fillStyle=qb.used?'#AAA':'#FFD700'; ctx.fillRect(qb.x,qb.y,qb.w,qb.h);
+    ctx.fillStyle='#000'; ctx.font='20px sans-serif'; ctx.textAlign='center'; if(!qb.used) ctx.fillText('?',qb.x+qb.w/2,qb.y+24);
+  }
+  for(const it of items){ ctx.fillStyle='#FFD700'; ctx.beginPath(); ctx.arc(it.x,it.y,8,0,Math.PI*2); ctx.fill(); }
+
+  ctx.fillStyle='#222'; ctx.fillRect(player.x,player.y,player.w,player.h);
+
+  for(const e of enemies){ ctx.fillStyle='#f00'; ctx.fillRect(e.x,e.y,e.w,e.h); ctx.fillStyle='#fff'; ctx.font='12px sans-serif'; ctx.fillText(e.name,e.x+e.w/2,e.y-4); }
+
+  ctx.restore();
+}
+
+let last=0;
+function loop(ts){ if(!last) last=ts; const dt=(ts-last)/16.666; last=ts; update(dt); draw(); requestAnimationFrame(loop); }
+window.addEventListener('keydown',e=>{ keys[e.key]=true; if(e.key==='r') loadLevel(currentLevel); });
+window.addEventListener('keyup',e=>{ keys[e.key]=false; });
+
+loadLevel(0);
+loop();
+})();
+</script>
